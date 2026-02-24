@@ -17,10 +17,10 @@ git init
 git add .
 git commit -m "feat: Lanzamiento inicial PULSE 2026"
 git branch -M main
-git remote add origin https://github.com/TU_USUARIO/PULSE_APP.git
+git remote add origin https://github.com/HMMierez/PULSE_APP.git
 git push -u origin main
 ```
-*(Reemplaza `TU_USUARIO` por tu nombre de usuario en GitHub).*
+*(Reemplaza `HMMierez` por tu nombre de usuario en GitHub si es diferente).*
 
 ## 3. Configurar la "Magia" (GitHub Secrets)
 Para que GitHub pueda desplegar en tu Firebase, necesitamos darle permiso:

@@ -1,6 +1,9 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 /**
  * PULSE - Application Main Entry Point
@@ -33,7 +36,177 @@ class PulseApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF121212), // Carbon Black
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const AuthGate(),
+    );
+  }
+}
+
+/**
+ * PULSE-CORE: Security Gate
+ * Manages the transition between Welcome and Home based on Auth state.
+ */
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF39FF14)),
+            ),
+          );
+        }
+        
+        if (snapshot.hasData) {
+          return const HomeScreen();
+        }
+
+        return const WelcomeScreen();
+      },
+    );
+  }
+}
+
+/**
+ * PULSE-VISUAL: Welcome Screen
+ * Features a hypnotizing breathing pulse logo.
+ */
+class WelcomeScreen extends StatefulWidget {
+  const WelcomeScreen({super.key});
+
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProviderStateMixin {
+  late AnimationController _breathingController;
+  late Animation<double> _glowIntensity;
+
+  @override
+  void initState() {
+    super.initState();
+    _breathingController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+
+    _glowIntensity = Tween<double>(begin: 10.0, end: 35.0).animate(
+      CurvedAnimation(parent: _breathingController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _breathingController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signInWithGoogle() async {
+    // PULSE-CORE: In a real environment, this triggers the Google Auth popup.
+    // For now, we use a placeholder or direct provider call if configured.
+    try {
+      GoogleAuthProvider googleProvider = GoogleAuthProvider();
+      await FirebaseAuth.instance.signInWithPopup(googleProvider);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error de conexión: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // THE LIVING PULSE: Breathing animation
+            AnimatedBuilder(
+              animation: _glowIntensity,
+              builder: (context, child) {
+                return Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF39FF14).withOpacity(0.3),
+                        blurRadius: _glowIntensity.value,
+                        spreadRadius: _glowIntensity.value / 4,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.show_chart,
+                    color: Color(0xFF39FF14),
+                    size: 80,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 60),
+            Text(
+              'PULSE',
+              style: GoogleFonts.inter(
+                color: Colors.white,
+                fontSize: 42,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 8,
+              ),
+            ),
+            Text(
+              'TU RITMO FINANCIERO',
+              style: GoogleFonts.inter(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 10,
+                letterSpacing: 4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 100),
+            // GOOGLE SIGN IN: Glassmorphism button
+            ClipRRect(
+              borderRadius: BorderRadius.circular(30),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: GestureDetector(
+                  onTap: _signInWithGoogle,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(color: const Color(0xFF39FF14).withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.login, color: Color(0xFF39FF14), size: 20),
+                        const SizedBox(width: 12),
+                        Text(
+                          'ENTRAR CON GOOGLE',
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -84,9 +257,23 @@ class _HomeScreenState extends State<HomeScreen> {
    * This function will call Firestore's Money_Flow collection.
    */
   void _processTransaction(String category) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final double amountValue = double.tryParse(_amount) ?? 0;
+
+    // PULSE-CORE: Persistencia Real en Firestore
+    FirebaseFirestore.instance.collection('Money_Flow').add({
+      'userId': user.uid,
+      'amount': amountValue,
+      'category': category,
+      'timestamp': FieldValue.serverTimestamp(),
+      'type': 'expense',
+    });
+
     setState(() {
       _amount = "0";
-      // Pulse-Brain: Simulating score reduction for instant feedback
+      // Pulse-Brain: Actualización instantánea visual
       _healthScore = (_healthScore - 2).clamp(0, 100);
     });
 
