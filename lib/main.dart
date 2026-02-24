@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -19,8 +20,38 @@ import 'package:google_sign_in/google_sign_in.dart';
  * - Pulse-Brain: AI Health Score calculation and pattern recognition.
  */
 
-void main() {
-  runApp(const PulseApp());
+void main() async {
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: "AIzaSyAye5GMq-cMTo5b4rsizx72jszmxX75RZU",
+        authDomain: "pulse-app-2026-unique123.firebaseapp.com",
+        projectId: "pulse-app-2026-unique123",
+        storageBucket: "pulse-app-2026-unique123.firebasestorage.app",
+        messagingSenderId: "986715824354",
+        appId: "1:986715824354:web:8925c8b40ee59a1327bebb",
+      ),
+    );
+    runApp(const PulseApp());
+  } catch (e) {
+    // PULSE-CORE: Fail-safe rendering for diagnostics
+    runApp(MaterialApp(
+      home: Scaffold(
+        backgroundColor: const Color(0xFF121212),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Text(
+              'PULSE Boot Error: $e',
+              style: const TextStyle(color: Color(0xFF39FF14), fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
 }
 
 class PulseApp extends StatelessWidget {
