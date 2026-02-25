@@ -355,10 +355,15 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       body: SafeArea(
-        child: Column(
-          children: [
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 360, // Rough estimate for keypad height
+                  ),
+                  child: IntrinsicHeight(
+                    child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('Money_Flow')
                     .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
@@ -376,64 +381,82 @@ class _HomeScreenState extends State<HomeScreen> {
                   const double budget = 5000.0; // Default budget for demo
                   double dynamicScore = ((budget - totalExpenses) / budget * 100).clamp(0, 100);
 
+                  final double screenHeight = MediaQuery.of(context).size.height;
+                  final bool isSmallScreen = screenHeight < 700;
+                  final double circleSize = isSmallScreen ? 170 : 200;
+
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 24.0, 
+                      vertical: isSmallScreen ? 12.0 : 20.0
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // HEADER: The Financial Snapshot
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'BALANCE ACTUAL',
-                                  style: GoogleFonts.inter(
-                                    color: Colors.white.withOpacity(0.5),
-                                    fontSize: 12,
-                                    letterSpacing: 2,
-                                    fontWeight: FontWeight.w600,
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'BALANCE ACTUAL',
+                                    style: GoogleFonts.inter(
+                                      color: Colors.white.withOpacity(0.5),
+                                      fontSize: 10,
+                                      letterSpacing: 2,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _formatAmount(_amount),
-                                  style: GoogleFonts.inter(
-                                    color: Colors.white,
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -1,
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _formatAmount(_amount),
+                                    style: GoogleFonts.inter(
+                                      color: Colors.white,
+                                      fontSize: isSmallScreen ? 36 : 48,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -1,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const _GlowingPulseLogo(),
-                          ],
+                                ],
+                              ),
+                              const _GlowingPulseLogo(),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 20),
+                        SizedBox(height: isSmallScreen ? 12 : 20),
                         // CENTER: The Pulse (Health Score)
                         Center(
-                          child: HealthCircle(key: _healthCircleKey, score: dynamicScore),
+                          child: HealthCircle(
+                            key: _healthCircleKey, 
+                            score: dynamicScore,
+                            size: circleSize,
+                          ),
                         ),
                         // PULSE-CORE: Transaction History Timeline
-                        const SizedBox(height: 20),
+                        SizedBox(height: isSmallScreen ? 12 : 20),
                         Expanded(
                           child: TransactionHistory(onDelete: _deleteTransaction),
                         ),
                         // ACTIONS: Smart Categories
                         if (_amount != "0")
-                          SmartCategories(
-                            onCategoryTap: _processTransaction,
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: SmartCategories(
+                              onCategoryTap: _processTransaction,
+                            ),
                           ),
-                        const SizedBox(height: 12),
                       ],
                     ),
                   );
                 }
               ),
             ),
+          ),
+        ),
             // INPUT: Glassmorphism Keypad
             GlassmorphismKeypad(onKeyTap: _onKeyTap),
           ],
@@ -457,35 +480,42 @@ class SmartCategories extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool isSmallScreen = MediaQuery.of(context).size.height < 700;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // PULSE-BRAIN SUGGESTION: Dynamic prediction (e.g., Lunch, Coffee, Rent)
+        // PULSE-BRAIN SUGGESTION: Dynamic prediction
         _CategoryButton(
           icon: Icons.auto_awesome_outlined,
           label: "Sugerido",
           isAI: true,
+          size: isSmallScreen ? 46 : 54,
           onTap: () => onCategoryTap("AI"),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: isSmallScreen ? 8 : 12),
         _CategoryButton(
           icon: Icons.restaurant_outlined,
           label: "Comida",
+          size: isSmallScreen ? 46 : 54,
           onTap: () => onCategoryTap("Comida"),
         ),
         _CategoryButton(
           icon: Icons.directions_car_outlined,
           label: "Transporte",
+          size: isSmallScreen ? 46 : 54,
           onTap: () => onCategoryTap("Transporte"),
         ),
         _CategoryButton(
           icon: Icons.confirmation_number_outlined,
           label: "Ocio",
+          size: isSmallScreen ? 46 : 54,
           onTap: () => onCategoryTap("Ocio"),
         ),
         _CategoryButton(
           icon: Icons.more_horiz_outlined,
           label: "Otros",
+          size: isSmallScreen ? 46 : 54,
           onTap: () => onCategoryTap("Otros"),
         ),
       ],
@@ -500,12 +530,14 @@ class _CategoryButton extends StatefulWidget {
   final IconData icon;
   final String label;
   final bool isAI;
+  final double size;
   final VoidCallback onTap;
 
   const _CategoryButton({
     required this.icon,
     required this.label,
     this.isAI = false,
+    this.size = 54,
     required this.onTap,
   });
 
@@ -538,9 +570,9 @@ class _CategoryButtonState extends State<_CategoryButton> with SingleTickerProvi
             animation: _glow,
             builder: (context, child) {
               return Container(
-                width: 54,
-                height: 54,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
+                width: widget.size,
+                height: widget.size,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
@@ -560,7 +592,7 @@ class _CategoryButtonState extends State<_CategoryButton> with SingleTickerProvi
                 child: Icon(
                   widget.icon,
                   color: widget.isAI || _glow.value > 0.5 ? const Color(0xFF39FF14) : Colors.white.withOpacity(0.7),
-                  size: 22,
+                  size: widget.size * 0.4,
                 ),
               );
             },
@@ -625,7 +657,7 @@ class GlassmorphismKeypad extends StatelessWidget {
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+          padding: EdgeInsets.fromLTRB(24, 16, 24, MediaQuery.of(context).padding.bottom + 10),
           decoration: BoxDecoration(
             color: Colors.white.withOpacity(0.03),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(40)),
@@ -646,7 +678,7 @@ class GlassmorphismKeypad extends StatelessWidget {
 
   Widget _buildRow(List<String> keys) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: keys.map((key) => KeypadButton(label: key, onTap: () => onKeyTap(key))).toList(),
@@ -709,7 +741,7 @@ class _KeypadButtonState extends State<KeypadButton> with SingleTickerProviderSt
                 shape: BoxShape.circle,
               ),
               child: Center(
-                child: _buildLabel(isDelete, isNext),
+                child: _buildLabel(isDelete, isNext, isSmallScreen),
               ),
             );
           },
@@ -718,14 +750,15 @@ class _KeypadButtonState extends State<KeypadButton> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildLabel(bool isDelete, bool isNext) {
-    if (isDelete) return const Icon(Icons.backspace_outlined, color: Colors.white, size: 22);
-    if (isNext) return const Icon(Icons.arrow_forward_rounded, color: Colors.black, size: 28);
+  Widget _buildLabel(bool isDelete, bool isNext, bool isSmall) {
+    final double iconSize = isSmall ? 18 : 22;
+    if (isDelete) return Icon(Icons.backspace_outlined, color: Colors.white, size: iconSize);
+    if (isNext) return Icon(Icons.arrow_forward_rounded, color: Colors.black, size: isSmall ? 22 : 28);
     return Text(
       widget.label,
       style: GoogleFonts.inter(
         color: Colors.white,
-        fontSize: 24,
+        fontSize: isSmall ? 18 : 24,
         fontWeight: FontWeight.w400,
       ),
     );
@@ -738,8 +771,9 @@ class _KeypadButtonState extends State<KeypadButton> with SingleTickerProviderSt
  */
 class HealthCircle extends StatefulWidget {
   final double score;
+  final double size;
 
-  const HealthCircle({super.key, required this.score});
+  const HealthCircle({super.key, required this.score, this.size = 200});
 
   @override
   State<HealthCircle> createState() => _HealthCircleState();
@@ -798,13 +832,13 @@ class _HealthCircleState extends State<HealthCircle> with TickerProviderStateMix
       child: ScaleTransition(
         scale: _pulseScale,
         child: SizedBox(
-          width: 200,
-          height: 200,
+          width: widget.size,
+          height: widget.size,
           child: Stack(
             alignment: Alignment.center,
             children: [
               CustomPaint(
-                size: const Size(200, 200),
+                size: Size(widget.size, widget.size),
                 painter: _HealthCirclePainter(progress: widget.score / 100),
               ),
               Column(
@@ -814,7 +848,7 @@ class _HealthCircleState extends State<HealthCircle> with TickerProviderStateMix
                     widget.score.toInt().toString(),
                     style: GoogleFonts.inter(
                       color: Colors.white,
-                      fontSize: 64,
+                      fontSize: widget.size * 0.32,
                       fontWeight: FontWeight.w200,
                     ),
                   ),
@@ -822,7 +856,7 @@ class _HealthCircleState extends State<HealthCircle> with TickerProviderStateMix
                     'SALUD ACTUAL',
                     style: GoogleFonts.inter(
                       color: Colors.white.withOpacity(0.4),
-                      fontSize: 10,
+                      fontSize: widget.size * 0.05,
                       letterSpacing: 1.5,
                       fontWeight: FontWeight.w600,
                     ),
@@ -1034,6 +1068,8 @@ class GoalsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
+    final bool isSmallScreen = MediaQuery.of(context).size.height < 700;
+
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       floatingActionButton: FloatingActionButton(
@@ -1044,7 +1080,7 @@ class GoalsScreen extends StatelessWidget {
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: EdgeInsets.all(isSmallScreen ? 16.0 : 24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1052,12 +1088,12 @@ class GoalsScreen extends StatelessWidget {
                 'MIS METAS',
                 style: GoogleFonts.inter(
                   color: Colors.white,
-                  fontSize: 24,
+                  fontSize: isSmallScreen ? 20 : 24,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 2,
                 ),
               ),
-              const SizedBox(height: 30),
+              SizedBox(height: isSmallScreen ? 16 : 30),
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
