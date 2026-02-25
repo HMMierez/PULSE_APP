@@ -959,34 +959,71 @@ class GoalsScreen extends StatelessWidget {
   const GoalsScreen({super.key});
 
   void _showAddGoal(BuildContext context) {
-    // PULSE-CORE: Manual goal entry mockup logic
+    final TextEditingController titleController = TextEditingController();
+    final TextEditingController targetController = TextEditingController();
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF131313),
-        title: Text('NUEVA META', style: GoogleFonts.inter(color: Colors.white, letterSpacing: 2)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          'NUEVA META',
+          style: GoogleFonts.inter(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 2,
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              decoration: const InputDecoration(labelText: 'Nombre meta', labelStyle: TextStyle(color: Colors.white30)),
+              controller: titleController,
+              decoration: InputDecoration(
+                labelText: '¿Qué quieres lograr?',
+                labelStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF39FF14))),
+              ),
               style: const TextStyle(color: Colors.white),
             ),
+            const SizedBox(height: 20),
             TextField(
-              decoration: const InputDecoration(labelText: 'Monto Objetivo', labelStyle: TextStyle(color: Colors.white30)),
+              controller: targetController,
+              decoration: InputDecoration(
+                labelText: 'Monto objetivo',
+                labelStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF39FF14))),
+              ),
               style: const TextStyle(color: Colors.white),
               keyboardType: TextInputType.number,
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR', style: TextStyle(color: Colors.white24))),
           TextButton(
-            onPressed: () {
-              // PULSE-CORE: Firestore logic here in the future
-              Navigator.pop(context);
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCELAR', style: TextStyle(color: Colors.white24, fontSize: 10)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final user = FirebaseAuth.instance.currentUser;
+              if (user != null && titleController.text.isNotEmpty) {
+                final target = double.tryParse(targetController.text) ?? 0.0;
+                await FirebaseFirestore.instance.collection('User_Goals').add({
+                  'userId': user.uid,
+                  'title': titleController.text,
+                  'target': target,
+                  'current': 0.0,
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+                if (context.mounted) Navigator.pop(context);
+              }
             },
-            child: const Text('CREAR', style: TextStyle(color: Color(0xFF39FF14))),
+            child: const Text('CREAR', style: TextStyle(color: Color(0xFF39FF14), fontWeight: FontWeight.w800)),
           ),
         ],
       ),
@@ -997,31 +1034,26 @@ class GoalsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF121212),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddGoal(context),
+        backgroundColor: const Color(0xFF39FF14),
+        shape: const CircleBorder(),
+        child: const Icon(Icons.add, color: Colors.black, size: 28),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'MIS METAS',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add, color: Color(0xFF39FF14)),
-                    onPressed: () => _showAddGoal(context),
-                  ),
-                ],
+              Text(
+                'MIS METAS',
+                style: GoogleFonts.inter(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 2,
+                ),
               ),
               const SizedBox(height: 30),
               Expanded(
@@ -1036,9 +1068,21 @@ class GoalsScreen extends StatelessWidget {
 
                     if (goals.isEmpty) {
                       return Center(
-                        child: Text(
-                          'SIN METAS TODAVÍA',
-                          style: GoogleFonts.inter(color: Colors.white10),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.flag_outlined, color: Colors.white.withOpacity(0.05), size: 100),
+                            const SizedBox(height: 20),
+                            Text(
+                              'SIN METAS TODAVÍA',
+                              style: GoogleFonts.inter(
+                                color: Colors.white.withOpacity(0.1),
+                                letterSpacing: 2,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       );
                     }
@@ -1047,8 +1091,12 @@ class GoalsScreen extends StatelessWidget {
                       itemCount: goals.length,
                       itemBuilder: (context, index) {
                         final data = goals[index].data() as Map<String, dynamic>;
-                        final double current = data['current'] ?? 0.0;
-                        final double target = data['target'] ?? 1000.0;
+                        final double current = (data['current'] is int) 
+                            ? (data['current'] as int).toDouble() 
+                            : (data['current'] ?? 0.0);
+                        final double target = (data['target'] is int) 
+                            ? (data['target'] as int).toDouble() 
+                            : (data['target'] ?? 1000.0);
                         final double progress = (current / target).clamp(0.0, 1.0);
 
                         return GoalCard(
@@ -1063,29 +1111,48 @@ class GoalsScreen extends StatelessWidget {
                 ),
               ),
               // PULSE-BRAIN: Gemini Insight Area
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.03),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF39FF14).withOpacity(0.2)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.auto_awesome, color: Color(0xFF39FF14), size: 24),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        'ANÁLISIS BRAIN: A este ritmo, completarás tu meta 2 semanas antes de lo previsto.',
-                        style: GoogleFonts.inter(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          height: 1.5,
-                        ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('User_Goals')
+                    .where('userId', isEqualTo: user?.uid)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  final bool hasNoGoals = !snapshot.hasData || snapshot.data!.docs.isEmpty;
+                  final String aiMessage = hasNoGoals 
+                      ? 'ANÁLISIS BRAIN: Tu dinero necesita un propósito. Define tu primera meta aquí abajo.'
+                      : 'ANÁLISIS BRAIN: A este ritmo, completarás tu meta 2 semanas antes de lo previsto.';
+
+                  return Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.03),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF39FF14).withOpacity(hasNoGoals ? 0.4 : 0.2)
                       ),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          hasNoGoals ? Icons.lightbulb_outline : Icons.auto_awesome, 
+                          color: const Color(0xFF39FF14), 
+                          size: 24
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            aiMessage,
+                            style: GoogleFonts.inter(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
               ),
             ],
           ),
