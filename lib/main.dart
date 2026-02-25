@@ -292,6 +292,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (user == null) return;
 
     final double amountValue = double.tryParse(_amount) ?? 0;
+    if (amountValue <= 0) return;
 
     // PULSE-CORE: Persistencia Real en Firestore
     FirebaseFirestore.instance.collection('Money_Flow').add({
@@ -310,6 +311,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Trigger visual heartbeat on the center circle
     _healthCircleKey.currentState?._handleTap();
+  }
+
+  void _deleteTransaction(String docId) {
+    FirebaseFirestore.instance.collection('Money_Flow').doc(docId).delete();
+    setState(() {
+      // Pulse-Brain: Recalculate or just visual feedback
+      _healthScore = (_healthScore + 2).clamp(0, 100);
+    });
   }
 
   /**
