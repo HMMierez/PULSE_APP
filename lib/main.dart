@@ -93,11 +93,37 @@ class AuthGate extends StatelessWidget {
         }
         
         if (snapshot.hasData) {
-          return const HomeScreen();
+          return const MainPage();
         }
 
         return const WelcomeScreen();
       },
+    );
+  }
+}
+
+/**
+ * PULSE-VISUAL: Main Navigation
+ * Lateral swipe navigation between Home and Goals.
+ */
+class MainPage extends StatefulWidget {
+  const MainPage({super.key});
+
+  @override
+  State<MainPage> createState() => _MainPageState();
+}
+
+class _MainPageState extends State<MainPage> {
+  final PageController _pageController = PageController();
+
+  @override
+  Widget build(BuildContext context) {
+    return PageView(
+      controller: _pageController,
+      children: [
+        const HomeScreen(),
+        const GoalsScreen(),
+      ],
     );
   }
 }
@@ -923,5 +949,246 @@ class _HealthCirclePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HealthCirclePainter oldDelegate) {
     return oldDelegate.progress != progress;
+  }
+}
+/**
+ * PULSE-VISUAL: Goals Screen
+ * Displays saving goals with progress bars.
+ */
+class GoalsScreen extends StatelessWidget {
+  const GoalsScreen({super.key});
+
+  void _showAddGoal(BuildContext context) {
+    // PULSE-CORE: Manual goal entry mockup logic
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF131313),
+        title: Text('NUEVA META', style: GoogleFonts.inter(color: Colors.white, letterSpacing: 2)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              decoration: const InputDecoration(labelText: 'Nombre meta', labelStyle: TextStyle(color: Colors.white30)),
+              style: const TextStyle(color: Colors.white),
+            ),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Monto Objetivo', labelStyle: TextStyle(color: Colors.white30)),
+              style: const TextStyle(color: Colors.white),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR', style: TextStyle(color: Colors.white24))),
+          TextButton(
+            onPressed: () {
+              // PULSE-CORE: Firestore logic here in the future
+              Navigator.pop(context);
+            },
+            child: const Text('CREAR', style: TextStyle(color: Color(0xFF39FF14))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'MIS METAS',
+                    style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add, color: Color(0xFF39FF14)),
+                    onPressed: () => _showAddGoal(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('User_Goals')
+                      .where('userId', isEqualTo: user?.uid)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const SizedBox();
+                    final goals = snapshot.data!.docs;
+
+                    if (goals.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'SIN METAS TODAVÍA',
+                          style: GoogleFonts.inter(color: Colors.white10),
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: goals.length,
+                      itemBuilder: (context, index) {
+                        final data = goals[index].data() as Map<String, dynamic>;
+                        final double current = data['current'] ?? 0.0;
+                        final double target = data['target'] ?? 1000.0;
+                        final double progress = (current / target).clamp(0.0, 1.0);
+
+                        return GoalCard(
+                          title: data['title'] ?? 'Meta',
+                          current: current,
+                          target: target,
+                          progress: progress,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              // PULSE-BRAIN: Gemini Insight Area
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.03),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF39FF14).withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.auto_awesome, color: Color(0xFF39FF14), size: 24),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(
+                        'ANÁLISIS BRAIN: A este ritmo, completarás tu meta 2 semanas antes de lo previsto.',
+                        style: GoogleFonts.inter(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GoalCard extends StatelessWidget {
+  final String title;
+  final double current;
+  final double target;
+  final double progress;
+
+  const GoalCard({
+    super.key,
+    required this.title,
+    required this.current,
+    required this.target,
+    required this.progress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title.toUpperCase(),
+                style: GoogleFonts.inter(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              Text(
+                '${(progress * 100).toInt()}%',
+                style: GoogleFonts.inter(
+                  color: const Color(0xFF39FF14),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text(
+                '\$${current.toInt()}',
+                style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                ' / \$${target.toInt()}',
+                style: GoogleFonts.inter(color: Colors.white24),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          // PULSE-VISUAL: Neon Progress Bar
+          Stack(
+            children: [
+              Container(
+                height: 4,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              FractionallySizedBox(
+                widthFactor: progress,
+                child: Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF39FF14),
+                    borderRadius: BorderRadius.circular(2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF39FF14).withOpacity(0.3),
+                        blurRadius: 10,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
