@@ -305,8 +305,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       _amount = "0";
-      // Pulse-Brain: Actualización instantánea visual
-      _healthScore = (_healthScore - 2).clamp(0, 100);
     });
 
     // Trigger visual heartbeat on the center circle
@@ -315,10 +313,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _deleteTransaction(String docId) {
     FirebaseFirestore.instance.collection('Money_Flow').doc(docId).delete();
-    setState(() {
-      // Pulse-Brain: Recalculate or just visual feedback
-      _healthScore = (_healthScore + 2).clamp(0, 100);
-    });
   }
 
   /**
@@ -338,56 +332,80 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           children: [
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // HEADER: The Financial Snapshot
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('Money_Flow')
+                    .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  double totalExpenses = 0;
+                  if (snapshot.hasData) {
+                    for (var doc in snapshot.data!.docs) {
+                      totalExpenses += (doc.data() as Map<String, dynamic>)['amount'] ?? 0.0;
+                    }
+                  }
+                  
+                  // PULSE-BRAIN: Dynamic Health Score Algorithm
+                  // S = ((Budget - Expenses) / Budget) * 100
+                  const double budget = 5000.0; // Default budget for demo
+                  double dynamicScore = ((budget - totalExpenses) / budget * 100).clamp(0, 100);
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        // HEADER: The Financial Snapshot
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              'BALANCE ACTUAL',
-                              style: GoogleFonts.inter(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: 12,
-                                letterSpacing: 2,
-                                fontWeight: FontWeight.w600,
-                              ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'BALANCE ACTUAL',
+                                  style: GoogleFonts.inter(
+                                    color: Colors.white.withOpacity(0.5),
+                                    fontSize: 12,
+                                    letterSpacing: 2,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _formatAmount(_amount),
+                                  style: GoogleFonts.inter(
+                                    color: Colors.white,
+                                    fontSize: 48,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -1,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _formatAmount(_amount),
-                              style: GoogleFonts.inter(
-                                color: Colors.white,
-                                fontSize: 48,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -1,
-                              ),
-                            ),
+                            const _GlowingPulseLogo(),
                           ],
                         ),
-                        const _GlowingPulseLogo(), // PULSE-VISUAL: Branding identity
+                        const SizedBox(height: 20),
+                        // CENTER: The Pulse (Health Score)
+                        Center(
+                          child: HealthCircle(key: _healthCircleKey, score: dynamicScore),
+                        ),
+                        // PULSE-CORE: Transaction History Timeline
+                        const SizedBox(height: 20),
+                        Expanded(
+                          child: TransactionHistory(onDelete: _deleteTransaction),
+                        ),
+                        // ACTIONS: Smart Categories
+                        if (_amount != "0")
+                          SmartCategories(
+                            onCategoryTap: _processTransaction,
+                          ),
+                        const SizedBox(height: 12),
                       ],
                     ),
-                    const Spacer(),
-                    // CENTER: The Pulse (Health Score)
-                    Center(
-                      child: HealthCircle(key: _healthCircleKey, score: _healthScore),
-                    ),
-                    const Spacer(),
-                    // ACTIONS: Smart Categories (Only visible with active amount)
-                    if (_amount != "0")
-                      SmartCategories(
-                        onCategoryTap: _processTransaction,
-                      ),
-                    const SizedBox(height: 24),
-                  ],
-                ),
+                  );
+                }
               ),
             ),
             // INPUT: Glassmorphism Keypad
@@ -645,35 +663,31 @@ class _KeypadButtonState extends State<KeypadButton> with SingleTickerProviderSt
     final bool isNext = widget.label == "next";
     final bool isDelete = widget.label == "delete";
 
-    return GestureDetector(
-      onTap: () {
-        _controller.forward(from: 0.0);
-        widget.onTap();
-      },
-      child: AnimatedBuilder(
-        animation: _glowAnimation,
-        builder: (context, child) {
-          return Container(
-            width: 70,
-            height: 70,
-            decoration: BoxDecoration(
-              color: isNext 
-                  ? const Color(0xFF39FF14).withOpacity(0.8)
-                  : Colors.white.withOpacity(0.05 + (_glowAnimation.value * 0.05)),
-              shape: BoxShape.circle,
-              boxShadow: [
-                if (_glowAnimation.value > 0 && !isNext)
-                  BoxShadow(
-                    color: const Color(0xFF39FF14).withOpacity(0.2 * _glowAnimation.value),
-                    blurRadius: 10,
-                  )
-              ],
-            ),
-            child: Center(
-              child: _buildLabel(isDelete, isNext),
-            ),
-          );
-        },
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(35),
+        splashColor: const Color(0xFF39FF14).withOpacity(0.2),
+        highlightColor: const Color(0xFF39FF14).withOpacity(0.1),
+        child: AnimatedBuilder(
+          animation: _glowAnimation,
+          builder: (context, child) {
+            return Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: isNext 
+                    ? const Color(0xFF39FF14).withOpacity(0.8)
+                    : Colors.white.withOpacity(0.05),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: _buildLabel(isDelete, isNext),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -763,14 +777,9 @@ class _HealthCircleState extends State<HealthCircle> with TickerProviderStateMix
           child: Stack(
             alignment: Alignment.center,
             children: [
-              AnimatedBuilder(
-                animation: _drawAnimation,
-                builder: (context, child) {
-                  return CustomPaint(
-                    size: const Size(200, 200),
-                    painter: _HealthCirclePainter(progress: _drawAnimation.value),
-                  );
-                },
+              CustomPaint(
+                size: const Size(200, 200),
+                painter: _HealthCirclePainter(progress: widget.score / 100),
               ),
               Column(
                 mainAxisSize: MainAxisSize.min,
@@ -798,6 +807,58 @@ class _HealthCircleState extends State<HealthCircle> with TickerProviderStateMix
           ),
         ),
       ),
+    );
+  }
+}
+
+class TransactionHistory extends StatelessWidget {
+  final Function(String) onDelete;
+  const TransactionHistory({super.key, required this.onDelete});
+
+  IconData _getIcon(String cat) {
+    switch(cat) {
+      case 'Comida': return Icons.restaurant;
+      case 'Transporte': return Icons.directions_car;
+      case 'Ocio': return Icons.confirmation_number;
+      default: return Icons.more_horiz;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('Money_Flow')
+          .where('userId', isEqualTo: user?.uid)
+          .orderBy('timestamp', descending: true)
+          .limit(10)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox();
+        final docs = snapshot.data!.docs;
+        return ListView.builder(
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            return Dismissible(
+              key: Key(docs[index].id),
+              direction: DismissDirection.endToStart,
+              onDismissed: (_) => onDelete(docs[index].id),
+              background: Container(
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.only(right: 20),
+                child: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              ),
+              child: ListTile(
+                leading: Icon(_getIcon(data['category']), color: const Color(0xFF39FF14), size: 18),
+                title: Text(data['category'].toString().toUpperCase(), style: GoogleFonts.inter(color: Colors.white70, fontSize: 10, letterSpacing: 1.2)),
+                trailing: Text('-\$${data['amount']}', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
