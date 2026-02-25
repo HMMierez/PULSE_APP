@@ -355,6 +355,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       body: SafeArea(
+        child: Column(
+          children: [
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -455,8 +457,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 }
               ),
             ),
-          ),
-        ),
             // INPUT: Glassmorphism Keypad
             GlassmorphismKeypad(onKeyTap: _onKeyTap),
           ],
@@ -721,19 +721,22 @@ class _KeypadButtonState extends State<KeypadButton> with SingleTickerProviderSt
     final bool isNext = widget.label == "next";
     final bool isDelete = widget.label == "delete";
 
+    final bool isSmallScreen = MediaQuery.of(context).size.height < 700;
+    final double btnSize = isSmallScreen ? 55 : 70;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(35),
+        borderRadius: BorderRadius.circular(btnSize / 2),
         splashColor: const Color(0xFF39FF14).withOpacity(0.2),
         highlightColor: const Color(0xFF39FF14).withOpacity(0.1),
         child: AnimatedBuilder(
           animation: _glowAnimation,
           builder: (context, child) {
             return Container(
-              width: 70,
-              height: 70,
+              width: btnSize,
+              height: btnSize,
               decoration: BoxDecoration(
                 color: isNext 
                     ? const Color(0xFF39FF14).withOpacity(0.8)
