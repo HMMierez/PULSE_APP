@@ -1034,6 +1034,8 @@ class GoalsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddGoal(context),
         backgroundColor: const Color(0xFF39FF14),
