@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,6 +8,60 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:confetti/confetti.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+
+/**
+ * PULSE-CORE: Transaction Mode
+ * Controls whether the keypad registers an Expense or an Income.
+ */
+enum TransactionMode { expense, income }
+
+/**
+ * PULSE-CORE: Localization Strings
+ * Bilingual support: es_ES (default) and en_US.
+ * Selected and stored in UserSettings.language.
+ */
+class AppStrings {
+  final String langCode;
+  const AppStrings._(this.langCode);
+
+  static const es = AppStrings._('es');
+  static const en = AppStrings._('en');
+
+  // ── Home
+  String get currentBalance => langCode == 'en' ? 'CURRENT BALANCE' : 'BALANCE ACTUAL';
+  String get financialPulse => langCode == 'en' ? 'FINANCIAL PULSE' : 'PULSO FINANCIERO';
+  String get expenseMode    => langCode == 'en' ? 'EXPENSE' : 'GASTO';
+  String get incomeMode     => langCode == 'en' ? 'INCOME' : 'INGRESO';
+
+  // ── Goals
+  String get goals     => langCode == 'en' ? 'GOALS' : 'METAS';
+  String get addGoal   => langCode == 'en' ? 'Add goal' : 'Agregar meta';
+
+  // ── Profile
+  String get profile        => langCode == 'en' ? 'PROFILE'          : 'PERFIL';
+  String get name           => langCode == 'en' ? 'NAME'             : 'NOMBRE';
+  String get monthlyBudget  => langCode == 'en' ? 'MONTHLY BUDGET'   : 'PRESUPUESTO MENSUAL';
+  String get currency       => langCode == 'en' ? 'CURRENCY'         : 'MONEDA';
+  String get language       => langCode == 'en' ? 'LANGUAGE'         : 'IDIOMA';
+  String get save           => langCode == 'en' ? 'SAVE'             : 'GUARDAR';
+  String get logout         => langCode == 'en' ? 'SIGN OUT'         : 'CERRAR SESIÓN';
+  String get profileSaved   => langCode == 'en' ? 'Profile saved ✓'  : 'Perfil guardado ✓';
+
+  // ── Commitments
+  String get commitments    => langCode == 'en' ? 'COMMITMENTS'      : 'COMPROMISOS';
+  String get addCommitment  => langCode == 'en' ? 'Add commitment'   : 'Agregar compromiso';
+  String get noCommitments  => langCode == 'en'
+      ? 'No fixed expenses yet.\nAdd your rent, phone, subscriptions…'
+      : 'Aún no hay gastos fijos.\nAgregá tu alquiler, teléfono, suscripciones…';
+
+  // ── AI - Invitation mode (no income registered)
+  String invitationMode(String name) {
+    final n = name.isNotEmpty ? name : (langCode == 'en' ? 'you' : 'vos');
+    return langCode == 'en'
+        ? '$n, add your salary to unlock your real health score.'
+        : '$n, registrá tu sueldo para calcular tu salud real.';
+  }
+}
 
 /**
  * PULSE-CORE: Weekly Scan Result
@@ -42,32 +97,37 @@ class UserSettings {
   final String currency;
   final double monthlyBudget;
   final bool isPremium;
+  final String language; // 'es' | 'en'
 
   const UserSettings({
     this.displayName = '',
     this.currency = 'ARS',
     this.monthlyBudget = 0,
     this.isPremium = false,
+    this.language = 'es',
   });
 
   factory UserSettings.fromFirestore(Map<String, dynamic> data) {
     return UserSettings(
-      displayName: data['displayName'] ?? '',
-      currency: data['currency'] ?? 'ARS',
+      displayName:   data['displayName'] ?? '',
+      currency:      data['currency'] ?? 'ARS',
       monthlyBudget: (data['monthlyBudget'] as num?)?.toDouble() ?? 0,
-      isPremium: data['isPremium'] ?? false,
+      isPremium:     data['isPremium'] ?? false,
+      language:      data['language'] ?? 'es',
     );
   }
 
   Map<String, dynamic> toMap() => {
-    'displayName': displayName,
-    'currency': currency,
+    'displayName':   displayName,
+    'currency':      currency,
     'monthlyBudget': monthlyBudget,
-    'isPremium': isPremium,
+    'isPremium':     isPremium,
+    'language':      language,
   };
 
   bool get hasBudget => monthlyBudget > 0;
   String get firstName => displayName.split(' ').first;
+  AppStrings get strings => language == 'en' ? AppStrings.en : AppStrings.es;
 }
 
 /**
@@ -377,75 +437,62 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<_HealthCircleState> _healthCircleKey = GlobalKey<_HealthCircleState>();
 
   // PULSE-CORE: Internal state management
-  String _amount = "0"; // Current input amount
-  double _healthScore = 85; // Current HP (Pulse Score)
+  String _amount  = '0';
+  TransactionMode _txMode = TransactionMode.expense;
+  String _aiAdvice    = 'Buscando patrones críticos...';
+  bool   _isAnalyzing = false;
 
-  /**
-   * Handle numeric input from the custom keyboard.
-   * Resets amount to '0' logic and prevents overflow.
-   */
+  // PULSE-VISUAL: Dynamic accent color based on transaction mode
+  static const _neon    = Color(0xFF39FF14); // Expense: neon green
+  static const _emerald = Color(0xFF00B37E); // Income:  emerald
+  Color get _accent => _txMode == TransactionMode.income ? _emerald : _neon;
+
+  // Income source labels (used in SmartCategories when income mode)
+  static const _incomeSources = ['Salario', 'Freelance', 'Inversión', 'Bono', 'Otros'];
+
   void _onKeyTap(String key) {
     setState(() {
-      if (key == "delete") {
-        if (_amount.length > 1) {
-          _amount = _amount.substring(0, _amount.length - 1);
-        } else {
-          _amount = "0";
-        }
-      } else if (key == "next") {
-        // Pulse-Core: Placeholder for navigation or expansion
-      } else {
-        if (_amount == "0") {
-          _amount = key;
-        } else if (_amount.length < 9) {
-          _amount += key;
-        }
+      if (key == 'delete') {
+        _amount = _amount.length > 1 ? _amount.substring(0, _amount.length - 1) : '0';
+      } else if (key != 'next') {
+        _amount = _amount == '0' ? key : (_amount.length < 9 ? _amount + key : _amount);
       }
     });
   }
 
-  /**
-   * Process transaction completion.
-   * 1. Resets the UI amount.
-   * 2. Simulates health score impact.
-   * 3. Triggers visual heartbeat.
-   * 
-   * Future Integration (Pulse-Core): 
-   * This function will call Firestore's Money_Flow collection.
-   */
+  /// Routes the transaction to the correct Firestore collection based on [_txMode].
   void _processTransaction(String category) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-
     final double amountValue = double.tryParse(_amount) ?? 0;
     if (amountValue <= 0) return;
 
-    // PULSE-CORE: Persistencia Real en Firestore
-    FirebaseFirestore.instance.collection('Money_Flow').add({
-      'userId': user.uid,
-      'amount': amountValue,
-      'category': category,
-      'timestamp': FieldValue.serverTimestamp(),
-      'type': 'expense',
-    });
+    if (_txMode == TransactionMode.income) {
+      // PULSE-CORE: Persist income to Incomes collection
+      FirebaseFirestore.instance.collection('Incomes').add({
+        'userId':    user.uid,
+        'amount':    amountValue,
+        'source':    category,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    } else {
+      // PULSE-CORE: Persist expense to Money_Flow collection
+      FirebaseFirestore.instance.collection('Money_Flow').add({
+        'userId':    user.uid,
+        'amount':    amountValue,
+        'category':  category,
+        'timestamp': FieldValue.serverTimestamp(),
+        'type':      'expense',
+      });
+    }
 
-    setState(() {
-      _amount = "0";
-    });
-
-    // Trigger visual heartbeat on the center circle
+    setState(() => _amount = '0');
     _healthCircleKey.currentState?._handleTap();
   }
 
   void _deleteTransaction(String docId) {
     FirebaseFirestore.instance.collection('Money_Flow').doc(docId).delete();
   }
-
-  /**
-   * Format raw string to financial representation (e.g. 12450 -> $12,450.00).
-   */
-  String _aiAdvice = "Buscando patrones críticos...";
-  bool _isAnalyzing = false;
 
   @override
   void initState() {
@@ -540,164 +587,258 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _generateAIAdvice(WeeklyScanResult scan, UserSettings settings) async {
     // PULSE-BRAIN: Gemini 1.5 Flash - Tactical Advisor (personalized)
-    const apiKey = "AIzaSyAye5GMq-cMTo5b4rsizx72jszmxX75RZU"; 
+    const apiKey = 'AIzaSyAye5GMq-cMTo5b4rsizx72jszmxX75RZU';
     final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: apiKey);
 
+    final uid  = FirebaseAuth.instance.currentUser!.uid;
     final name = settings.firstName.isNotEmpty ? settings.firstName : 'usuario';
-    final budget = settings.monthlyBudget;
-    final spent = scan.totalWeekly;
-    final weeklyBudget = budget > 0 ? (budget / 4) : 0;
-    final remaining = weeklyBudget > 0 ? weeklyBudget - spent : 0;
-    
+    final strings = settings.strings;
+
+    // PULSE-CORE: Fetch totals from Incomes and Fixed_Expenses
+    double totalIncomes = 0;
+    double totalFixed   = 0;
+    try {
+      final incSnap = await FirebaseFirestore.instance
+          .collection('Incomes')
+          .where('userId', isEqualTo: uid)
+          .get();
+      for (var d in incSnap.docs) {
+        totalIncomes += ((d.data())['amount'] as num?)?.toDouble() ?? 0;
+      }
+      final fixSnap = await FirebaseFirestore.instance
+          .collection('Fixed_Expenses')
+          .where('userId', isEqualTo: uid)
+          .where('isActive', isEqualTo: true)
+          .get();
+      for (var d in fixSnap.docs) {
+        totalFixed += ((d.data())['amount'] as num?)?.toDouble() ?? 0;
+      }
+    } catch (_) {}
+
+    // PULSE-BRAIN: Invitation Mode – user has no income registered
+    if (totalIncomes <= 0) {
+      setState(() {
+        _aiAdvice = strings.invitationMode(name);
+        _isAnalyzing = false;
+      });
+      return;
+    }
+
+    final budget      = settings.monthlyBudget;
+    final spent       = scan.totalWeekly;
+    final weeklyBudget = budget > 0 ? (budget / 4) : (totalIncomes / 4);
+    final remaining   = weeklyBudget - spent;
+    final healthScore = ((totalIncomes - (totalFixed + scan.totalWeekly)) / totalIncomes * 100)
+        .clamp(0, 100);
+
     final prompt = """
     Eres Pulse-Brain, el asesor financiero personal de $name.
     Comienza siempre mencionando su nombre ($name) de forma breve y natural.
-    
-    REPORTE PRIVADO DE LA SEMANA:
-    - PRESUPUESTO MENSUAL: \$${budget.toStringAsFixed(0)}
-    - PRESUPUESTO SEMANAL ESTIMADO: \$${weeklyBudget.toStringAsFixed(0)}
-    - GASTADO ESTA SEMANA: \$${spent.toStringAsFixed(0)}
+
+    REPORTE FINANCIERO REAL:
+    - INGRESOS TOTALES: \$${totalIncomes.toStringAsFixed(0)}
+    - GASTOS FIJOS ACTIVOS: \$${totalFixed.toStringAsFixed(0)}
+    - GASTOS DIARIOS ESTA SEMANA: \$${spent.toStringAsFixed(0)}
     - MARGEN RESTANTE: \$${remaining.toStringAsFixed(0)}
+    - PULSO FINANCIERO: ${healthScore.toStringAsFixed(0)}%
     - POR CATEGORÍA: ${scan.byCategory}
     - POR DÍA: ${scan.byDay}
-    
+
     Tu misión:
     1. Saluda brevemente a $name (2-3 palabras máx con su nombre).
-    2. Detecta UN patrón crítico usando datos reales.
+    2. Detecta UN patrón crítico usando DATOS REALES (no genérico).
     3. Da un consejo de EXACTAMENTE máx 20 palabras total (incluyendo el saludo).
-    4. Tono: directo, preciso, sin adornos extra.
-    
+    4. Tono: directo, preciso, sin adornos.
+
     Formato: '$name, [observación concreta + consejo accionable].'
     """;
 
-    final content = [Content.text(prompt)];
+    final content  = [Content.text(prompt)];
     final response = await model.generateContent(content);
-    
+
     setState(() {
-      _aiAdvice = response.text?.trim() ?? 'Sigue así, $name, vas por buen camino.';
+      _aiAdvice    = response.text?.trim() ?? 'Sigue así, $name, vas por buen camino.';
       _isAnalyzing = false;
     });
   }
 
   String _formatAmount(String raw) {
-    if (raw == "0") return "\$0.00";
+    if (raw == '0') return '\$0.00';
     final double value = double.tryParse(raw) ?? 0;
-    return "\$${value.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}.00";
+    return '\$${value.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}.00';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF121212),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 360,
-                  ),
-                  child: IntrinsicHeight(
-                    child: StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('Money_Flow')
-                          .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        double totalExpenses = 0;
-                        if (snapshot.hasData) {
-                          for (var doc in snapshot.data!.docs) {
-                            totalExpenses += (doc.data() as Map<String, dynamic>)['amount'] ?? 0.0;
-                          }
-                        }
-                        
-                        const double budget = 5000.0;
-                        double dynamicScore = ((budget - totalExpenses) / budget * 100).clamp(0, 100);
+    final isIncome = _txMode == TransactionMode.income;
+    return AnimatedTheme(
+      duration: const Duration(milliseconds: 350),
+      data: Theme.of(context),
+      child: Scaffold(
+        backgroundColor: const Color(0xFF121212),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: MediaQuery.of(context).size.height -
+                          MediaQuery.of(context).padding.top - 420,
+                    ),
+                    child: IntrinsicHeight(
+                      // PULSE-CORE: Real-time Health Score from 3 collections
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('Money_Flow')
+                            .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                            .snapshots(),
+                        builder: (context, expSnap) {
+                          return StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('Incomes')
+                                .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                                .snapshots(),
+                            builder: (context, incSnap) {
+                              return StreamBuilder<QuerySnapshot>(
+                                stream: FirebaseFirestore.instance
+                                    .collection('Fixed_Expenses')
+                                    .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                                    .where('isActive', isEqualTo: true)
+                                    .snapshots(),
+                                builder: (context, fixSnap) {
+                                  double totalExpenses = 0;
+                                  double totalIncomes  = 0;
+                                  double totalFixed    = 0;
 
-                        final double screenHeight = MediaQuery.of(context).size.height;
-                        final bool isSmallScreen = screenHeight < 700;
-                        final double circleSize = isSmallScreen ? 170 : 200;
+                                  if (expSnap.hasData) {
+                                    for (var d in expSnap.data!.docs) {
+                                      totalExpenses += ((d.data() as Map<String, dynamic>)['amount'] as num?)?.toDouble() ?? 0;
+                                    }
+                                  }
+                                  if (incSnap.hasData) {
+                                    for (var d in incSnap.data!.docs) {
+                                      totalIncomes += ((d.data() as Map<String, dynamic>)['amount'] as num?)?.toDouble() ?? 0;
+                                    }
+                                  }
+                                  if (fixSnap.hasData) {
+                                    for (var d in fixSnap.data!.docs) {
+                                      totalFixed += ((d.data() as Map<String, dynamic>)['amount'] as num?)?.toDouble() ?? 0;
+                                    }
+                                  }
 
-                        return Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 24.0, 
-                            vertical: isSmallScreen ? 12.0 : 20.0
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(top: 10.0),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Column(
+                                  // PULSE-BRAIN: S = (I - (F + D)) / I × 100
+                                  double dynamicScore;
+                                  if (totalIncomes <= 0) {
+                                    dynamicScore = 0;
+                                  } else {
+                                    dynamicScore = ((totalIncomes - (totalFixed + totalExpenses)) / totalIncomes * 100).clamp(0, 100);
+                                  }
+
+                                  final double screenHeight = MediaQuery.of(context).size.height;
+                                  final bool isSmallScreen  = screenHeight < 700;
+                                  final double circleSize   = isSmallScreen ? 170 : 200;
+
+                                  return Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 24.0,
+                                      vertical: isSmallScreen ? 12.0 : 20.0,
+                                    ),
+                                    child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(
-                                          'BALANCE ACTUAL',
-                                          style: GoogleFonts.inter(
-                                            color: Colors.white.withOpacity(0.5),
-                                            fontSize: 10,
-                                            letterSpacing: 2,
-                                            fontWeight: FontWeight.w600,
+                                        // ── Header: label + amount + logo ─────────────────────
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 10.0),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  AnimatedDefaultTextStyle(
+                                                    duration: const Duration(milliseconds: 300),
+                                                    style: GoogleFonts.inter(
+                                                      color: _accent.withOpacity(0.6),
+                                                      fontSize: 10,
+                                                      letterSpacing: 2,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                    child: Text(isIncome ? 'INGRESO' : 'PULSO FINANCIERO'),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  AnimatedDefaultTextStyle(
+                                                    duration: const Duration(milliseconds: 300),
+                                                    style: GoogleFonts.inter(
+                                                      color: _amount != '0' ? _accent : Colors.white,
+                                                      fontSize: isSmallScreen ? 36 : 48,
+                                                      fontWeight: FontWeight.w700,
+                                                      letterSpacing: -1,
+                                                    ),
+                                                    child: Text(_formatAmount(_amount)),
+                                                  ),
+                                                ],
+                                              ),
+                                              const _GlowingPulseLogo(),
+                                            ],
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          _formatAmount(_amount),
-                                          style: GoogleFonts.inter(
-                                            color: Colors.white,
-                                            fontSize: isSmallScreen ? 36 : 48,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: -1,
+                                        SizedBox(height: isSmallScreen ? 12 : 20),
+                                        // ── Health Circle ──────────────────────────────────────
+                                        Center(
+                                          child: HealthCircle(
+                                            key: _healthCircleKey,
+                                            score: dynamicScore,
+                                            size: circleSize,
                                           ),
                                         ),
+                                        // ── Live Pulse Advice ──────────────────────────────────
+                                        LivePulseAdviceCard(
+                                          advice: _aiAdvice,
+                                          isAnalyzing: _isAnalyzing,
+                                        ),
+                                        SizedBox(height: isSmallScreen ? 12 : 20),
+                                        TransactionHistory(onDelete: _deleteTransaction),
+                                        // ── Smart Categories (context-aware) ──────────────────
+                                        if (_amount != '0')
+                                          Padding(
+                                            padding: const EdgeInsets.only(bottom: 8.0),
+                                            child: isIncome
+                                                ? _IncomeSourcePicker(
+                                                    accent: _accent,
+                                                    sources: _incomeSources,
+                                                    onTap: _processTransaction,
+                                                  )
+                                                : SmartCategories(
+                                                    onCategoryTap: _processTransaction,
+                                                  ),
+                                          ),
                                       ],
                                     ),
-                                    const _GlowingPulseLogo(),
-                                  ],
-                                ),
-                              ),
-                              SizedBox(height: isSmallScreen ? 12 : 20),
-                              Center(
-                                child: HealthCircle(
-                                  key: _healthCircleKey, 
-                                  score: dynamicScore,
-                                  size: circleSize,
-                                ),
-                              ),
-                              // PULSE-VISUAL: Live Pulse Advice Card
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 0),
-                                child: LivePulseAdviceCard(
-                                  advice: _aiAdvice, 
-                                  isAnalyzing: _isAnalyzing,
-                                ),
-                              ),
-                              SizedBox(height: isSmallScreen ? 12 : 20),
-                              TransactionHistory(onDelete: _deleteTransaction),
-                              if (_amount != "0")
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
-                                  child: SmartCategories(
-                                    onCategoryTap: _processTransaction,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        );
-                      }
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            // INPUT: Glassmorphism Keypad
-            GlassmorphismKeypad(onKeyTap: _onKeyTap),
-          ],
+              // ── TOGGLE: GASTO | INGRESO ────────────────────────────────────
+              _TransactionToggle(
+                mode: _txMode,
+                onChanged: (m) => setState(() {
+                  _txMode = m;
+                  _amount = '0';
+                }),
+              ),
+              // ── KEYPAD ───────────────────────────────────────────────────
+              GlassmorphismKeypad(onKeyTap: _onKeyTap),
+            ],
+          ),
         ),
       ),
     );
@@ -1806,6 +1947,53 @@ class _LivePulseAdviceCardState extends State<LivePulseAdviceCard>
 }
 
 /**
+ * PULSE-VISUAL: Language Chip
+ * Small selectable pill for the language selector in ProfileScreen.
+ */
+class _LangChip extends StatelessWidget {
+  final String label;
+  final String code;
+  final bool selected;
+  final VoidCallback onTap;
+
+  static const _neon = Color(0xFF39FF14);
+
+  const _LangChip({
+    required this.label,
+    required this.code,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? _neon.withOpacity(0.5) : Colors.white.withOpacity(0.08),
+            width: 0.5,
+          ),
+          color: selected ? _neon.withOpacity(0.08) : Colors.transparent,
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(
+            color: selected ? _neon.withOpacity(0.9) : Colors.white.withOpacity(0.3),
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/**
  * PULSE-VISUAL: Profile Screen (Identity Hub)
  * Displays and edits user profile: avatar, name, budget, currency.
  * Pulse-Core: Reads/writes to Firestore User_Settings collection.
@@ -1863,6 +2051,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       currency:      _settings.currency,
       monthlyBudget: double.tryParse(_budgetController.text) ?? 0,
       isPremium:     _settings.isPremium,
+      language:      _settings.language,
     );
 
     await UserSettingsService.save(uid, updated);
@@ -2060,6 +2249,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Divider(color: Colors.white.withOpacity(0.08), height: 1),
                 ],
               ),
+              const SizedBox(height: 28),
+
+              // ── Selector de Idioma ───────────────────────────────────────
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('IDIOMA',
+                      style: GoogleFonts.inter(
+                        color: Colors.white.withOpacity(0.3),
+                        fontSize: 9,
+                        letterSpacing: 2,
+                        fontWeight: FontWeight.w600,
+                      )),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _LangChip(
+                        label: 'Español',
+                        code: 'es',
+                        selected: _settings.language == 'es',
+                        onTap: () => setState(() {
+                          _settings = UserSettings(
+                            displayName:   _settings.displayName,
+                            currency:      _settings.currency,
+                            monthlyBudget: _settings.monthlyBudget,
+                            isPremium:     _settings.isPremium,
+                            language:      'es',
+                          );
+                        }),
+                      ),
+                      const SizedBox(width: 10),
+                      _LangChip(
+                        label: 'English',
+                        code: 'en',
+                        selected: _settings.language == 'en',
+                        onTap: () => setState(() {
+                          _settings = UserSettings(
+                            displayName:   _settings.displayName,
+                            currency:      _settings.currency,
+                            monthlyBudget: _settings.monthlyBudget,
+                            isPremium:     _settings.isPremium,
+                            language:      'en',
+                          );
+                        }),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Divider(color: Colors.white.withOpacity(0.08), height: 1),
+                ],
+              ),
               const SizedBox(height: 44),
 
               // ── Botón Guardar ────────────────────────────────────────────
@@ -2201,6 +2441,554 @@ class _MinimalField extends StatelessWidget {
         const SizedBox(height: 6),
         Divider(color: Colors.white.withOpacity(0.1), height: 1),
       ],
+    );
+  }
+}
+
+/**
+ * PULSE-VISUAL: Transaction Mode Toggle
+ * Glassmorphism pill toggle above the keypad: [ GASTO | INGRESO ]
+ * Neon Green for expense, Emerald for income.
+ */
+class _TransactionToggle extends StatelessWidget {
+  final TransactionMode mode;
+  final ValueChanged<TransactionMode> onChanged;
+
+  static const _neon    = Color(0xFF39FF14);
+  static const _emerald = Color(0xFF00B37E);
+
+  const _TransactionToggle({required this.mode, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final isIncome = mode == TransactionMode.income;
+    final accent   = isIncome ? _emerald : _neon;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(30),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: accent.withOpacity(0.2), width: 0.5),
+            ),
+            child: Row(
+              children: [
+                _Segment(
+                  label: 'GASTO',
+                  active: !isIncome,
+                  accent: _neon,
+                  onTap: () => onChanged(TransactionMode.expense),
+                ),
+                _Segment(
+                  label: 'INGRESO',
+                  active: isIncome,
+                  accent: _emerald,
+                  onTap: () => onChanged(TransactionMode.income),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Segment extends StatelessWidget {
+  final String label;
+  final bool active;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _Segment({
+    required this.label,
+    required this.active,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(30),
+            color: active ? accent.withOpacity(0.12) : Colors.transparent,
+            border: active
+                ? Border.all(color: accent.withOpacity(0.5), width: 0.8)
+                : Border.all(color: Colors.transparent, width: 0.8),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                color: active ? accent : Colors.white.withOpacity(0.3),
+                fontSize: 11,
+                letterSpacing: 2,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/**
+ * PULSE-VISUAL: Income Source Picker
+ * Emerald-themed chip row shown when in INCOME mode.
+ */
+class _IncomeSourcePicker extends StatelessWidget {
+  final Color accent;
+  final List<String> sources;
+  final void Function(String) onTap;
+
+  const _IncomeSourcePicker({
+    required this.accent,
+    required this.sources,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'FUENTE DE INGRESO',
+          style: GoogleFonts.inter(
+            color: accent.withOpacity(0.5),
+            fontSize: 9,
+            letterSpacing: 2,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: sources.map((source) {
+            return GestureDetector(
+              onTap: () => onTap(source),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: accent.withOpacity(0.4), width: 0.5),
+                  color: accent.withOpacity(0.07),
+                ),
+                child: Text(
+                  source,
+                  style: GoogleFonts.inter(
+                    color: accent.withOpacity(0.9),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
+/**
+ * PULSE-VISUAL: Commitments Screen (Gastos Fijos)
+ * List of monthly fixed expenses with an on/off switch.
+ * Pulse-Core: Reads/writes to Fixed_Expenses Firestore collection.
+ */
+class CommitmentsScreen extends StatefulWidget {
+  const CommitmentsScreen({super.key});
+
+  @override
+  State<CommitmentsScreen> createState() => _CommitmentsScreenState();
+}
+
+class _CommitmentsScreenState extends State<CommitmentsScreen> {
+  final _nameCtrl   = TextEditingController();
+  final _amountCtrl = TextEditingController();
+  bool _adding = false;
+
+  static const _neon    = Color(0xFF39FF14);
+  static const _emerald = Color(0xFF00B37E);
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _amountCtrl.dispose();
+    super.dispose();
+  }
+
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  Stream<QuerySnapshot> get _stream => FirebaseFirestore.instance
+      .collection('Fixed_Expenses')
+      .where('userId', isEqualTo: _uid)
+      .orderBy('timestamp', descending: false)
+      .snapshots();
+
+  Future<void> _addCommitment() async {
+    final name   = _nameCtrl.text.trim();
+    final amount = double.tryParse(_amountCtrl.text) ?? 0;
+    if (name.isEmpty || amount <= 0 || _uid == null) return;
+
+    await FirebaseFirestore.instance.collection('Fixed_Expenses').add({
+      'userId':    _uid,
+      'name':      name,
+      'amount':    amount,
+      'isActive':  true,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    _nameCtrl.clear();
+    _amountCtrl.clear();
+    setState(() => _adding = false);
+  }
+
+  Future<void> _toggleActive(String docId, bool current) async {
+    await FirebaseFirestore.instance
+        .collection('Fixed_Expenses')
+        .doc(docId)
+        .update({'isActive': !current});
+  }
+
+  Future<void> _delete(String docId) async {
+    await FirebaseFirestore.instance
+        .collection('Fixed_Expenses')
+        .doc(docId)
+        .delete();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            // ── Header ─────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'COMPROMISOS',
+                    style: GoogleFonts.inter(
+                      color: Colors.white.withOpacity(0.35),
+                      fontSize: 11,
+                      letterSpacing: 3,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => setState(() => _adding = !_adding),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: _adding
+                              ? Colors.white.withOpacity(0.15)
+                              : _neon.withOpacity(0.4),
+                          width: 0.5,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        color: _adding ? Colors.transparent : _neon.withOpacity(0.07),
+                      ),
+                      child: Text(
+                        _adding ? 'CANCELAR' : '+ AGREGAR',
+                        style: GoogleFonts.inter(
+                          color: _adding
+                              ? Colors.white.withOpacity(0.3)
+                              : _neon.withOpacity(0.9),
+                          fontSize: 9,
+                          letterSpacing: 1.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                'Gastos que salen cada mes',
+                style: GoogleFonts.inter(
+                  color: Colors.white.withOpacity(0.2),
+                  fontSize: 10,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── Add Form ────────────────────────────────────────────────────
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOut,
+              child: _adding
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _neon.withOpacity(0.15), width: 0.5),
+                            ),
+                            child: Column(
+                              children: [
+                                _MinimalField(
+                                  label: 'NOMBRE',
+                                  controller: _nameCtrl,
+                                  hint: 'Alquiler, Netflix, Gym…',
+                                ),
+                                const SizedBox(height: 12),
+                                _MinimalField(
+                                  label: 'MONTO MENSUAL',
+                                  controller: _amountCtrl,
+                                  hint: '0',
+                                  prefix: '\$  ',
+                                  keyboardType: TextInputType.number,
+                                ),
+                                const SizedBox(height: 16),
+                                GestureDetector(
+                                  onTap: _addCommitment,
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                          color: _neon.withOpacity(0.5), width: 0.5),
+                                      borderRadius: BorderRadius.circular(8),
+                                      color: _neon.withOpacity(0.08),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'GUARDAR',
+                                        style: GoogleFonts.inter(
+                                          color: _neon,
+                                          fontSize: 11,
+                                          letterSpacing: 2,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+
+            // ── List ────────────────────────────────────────────────────────
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _stream,
+                builder: (ctx, snap) {
+                  if (!snap.hasData || snap.data!.docs.isEmpty) {
+                    return Center(
+                      child: Text(
+                        'Aún no hay gastos fijos.\nAgregá tu alquiler, teléfono, suscripciones…',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          color: Colors.white.withOpacity(0.2),
+                          fontSize: 12,
+                          height: 1.8,
+                        ),
+                      ),
+                    );
+                  }
+
+                  double monthlyTotal = 0;
+                  for (var d in snap.data!.docs) {
+                    final data = d.data() as Map<String, dynamic>;
+                    if (data['isActive'] == true) {
+                      monthlyTotal += (data['amount'] as num?)?.toDouble() ?? 0;
+                    }
+                  }
+
+                  return Column(
+                    children: [
+                      // Summary bar
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'TOTAL ACTIVO / MES',
+                              style: GoogleFonts.inter(
+                                color: Colors.white.withOpacity(0.25),
+                                fontSize: 9,
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                            Text(
+                              '\$${monthlyTotal.toStringAsFixed(0)}',
+                              style: GoogleFonts.inter(
+                                color: _emerald.withOpacity(0.8),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Divider(
+                        color: Colors.white.withOpacity(0.05),
+                        height: 1,
+                        indent: 24,
+                        endIndent: 24,
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: ListView.builder(
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          itemCount: snap.data!.docs.length,
+                          itemBuilder: (ctx, i) {
+                            final doc  = snap.data!.docs[i];
+                            final data = doc.data() as Map<String, dynamic>;
+                            final bool isActive = data['isActive'] ?? true;
+                            final double amount = (data['amount'] as num?)?.toDouble() ?? 0;
+                            final String name   = data['name'] ?? '';
+
+                            return Dismissible(
+                              key: Key(doc.id),
+                              direction: DismissDirection.endToStart,
+                              background: Container(
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                child: Icon(Icons.delete_outline,
+                                    color: Colors.red.withOpacity(0.6), size: 20),
+                              ),
+                              onDismissed: (_) => _delete(doc.id),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(
+                                  children: [
+                                    // Color dot
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isActive
+                                            ? _emerald.withOpacity(0.7)
+                                            : Colors.white.withOpacity(0.1),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            name,
+                                            style: GoogleFonts.inter(
+                                              color: isActive
+                                                  ? Colors.white.withOpacity(0.85)
+                                                  : Colors.white.withOpacity(0.3),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          Text(
+                                            '\$${amount.toStringAsFixed(0)} / mes',
+                                            style: GoogleFonts.inter(
+                                              color: Colors.white.withOpacity(0.25),
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    // Toggle switch
+                                    GestureDetector(
+                                      onTap: () => _toggleActive(doc.id, isActive),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 200),
+                                        width: 42,
+                                        height: 24,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(12),
+                                          color: isActive
+                                              ? _emerald.withOpacity(0.2)
+                                              : Colors.white.withOpacity(0.05),
+                                          border: Border.all(
+                                            color: isActive
+                                                ? _emerald.withOpacity(0.5)
+                                                : Colors.white.withOpacity(0.1),
+                                            width: 0.5,
+                                          ),
+                                        ),
+                                        child: Stack(
+                                          children: [
+                                            AnimatedPositioned(
+                                              duration: const Duration(milliseconds: 200),
+                                              left: isActive ? 20 : 2,
+                                              top: 3,
+                                              child: Container(
+                                                width: 18,
+                                                height: 18,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: isActive ? _emerald : Colors.white.withOpacity(0.25),
+                                                  boxShadow: isActive
+                                                      ? [BoxShadow(
+                                                          color: _emerald.withOpacity(0.4),
+                                                          blurRadius: 6,
+                                                        )]
+                                                      : [],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
