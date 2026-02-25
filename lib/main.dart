@@ -276,6 +276,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Key used to trigger animations in the HealthCircle child from the parent.
+  final GlobalKey<_HealthCircleState> _healthCircleKey = GlobalKey<_HealthCircleState>();
+
   // PULSE-CORE: Internal state management
   String _amount = "0"; // Current input amount
   double _healthScore = 85; // Current HP (Pulse Score)
@@ -362,99 +365,94 @@ class _HomeScreenState extends State<HomeScreen> {
                 physics: const BouncingScrollPhysics(),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    minHeight: MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 360, // Rough estimate for keypad height
+                    minHeight: MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 360,
                   ),
                   child: IntrinsicHeight(
                     child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('Money_Flow')
-                    .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  double totalExpenses = 0;
-                  if (snapshot.hasData) {
-                    for (var doc in snapshot.data!.docs) {
-                      totalExpenses += (doc.data() as Map<String, dynamic>)['amount'] ?? 0.0;
-                    }
-                  }
-                  
-                  // PULSE-BRAIN: Dynamic Health Score Algorithm
-                  // S = ((Budget - Expenses) / Budget) * 100
-                  const double budget = 5000.0; // Default budget for demo
-                  double dynamicScore = ((budget - totalExpenses) / budget * 100).clamp(0, 100);
+                      stream: FirebaseFirestore.instance
+                          .collection('Money_Flow')
+                          .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        double totalExpenses = 0;
+                        if (snapshot.hasData) {
+                          for (var doc in snapshot.data!.docs) {
+                            totalExpenses += (doc.data() as Map<String, dynamic>)['amount'] ?? 0.0;
+                          }
+                        }
+                        
+                        const double budget = 5000.0;
+                        double dynamicScore = ((budget - totalExpenses) / budget * 100).clamp(0, 100);
 
-                  final double screenHeight = MediaQuery.of(context).size.height;
-                  final bool isSmallScreen = screenHeight < 700;
-                  final double circleSize = isSmallScreen ? 170 : 200;
+                        final double screenHeight = MediaQuery.of(context).size.height;
+                        final bool isSmallScreen = screenHeight < 700;
+                        final double circleSize = isSmallScreen ? 170 : 200;
 
-                  return Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 24.0, 
-                      vertical: isSmallScreen ? 12.0 : 20.0
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // HEADER: The Financial Snapshot
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        return Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 24.0, 
+                            vertical: isSmallScreen ? 12.0 : 20.0
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'BALANCE ACTUAL',
-                                    style: GoogleFonts.inter(
-                                      color: Colors.white.withOpacity(0.5),
-                                      fontSize: 10,
-                                      letterSpacing: 2,
-                                      fontWeight: FontWeight.w600,
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'BALANCE ACTUAL',
+                                          style: GoogleFonts.inter(
+                                            color: Colors.white.withOpacity(0.5),
+                                            fontSize: 10,
+                                            letterSpacing: 2,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _formatAmount(_amount),
+                                          style: GoogleFonts.inter(
+                                            color: Colors.white,
+                                            fontSize: isSmallScreen ? 36 : 48,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: -1,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _formatAmount(_amount),
-                                    style: GoogleFonts.inter(
-                                      color: Colors.white,
-                                      fontSize: isSmallScreen ? 36 : 48,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: -1,
-                                    ),
-                                  ),
-                                ],
+                                    const _GlowingPulseLogo(),
+                                  ],
+                                ),
                               ),
-                              const _GlowingPulseLogo(),
+                              SizedBox(height: isSmallScreen ? 12 : 20),
+                              Center(
+                                child: HealthCircle(
+                                  key: _healthCircleKey, 
+                                  score: dynamicScore,
+                                  size: circleSize,
+                                ),
+                              ),
+                              SizedBox(height: isSmallScreen ? 12 : 20),
+                              TransactionHistory(onDelete: _deleteTransaction),
+                              if (_amount != "0")
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: SmartCategories(
+                                    onCategoryTap: _processTransaction,
+                                  ),
+                                ),
                             ],
                           ),
-                        ),
-                        SizedBox(height: isSmallScreen ? 12 : 20),
-                        // CENTER: The Pulse (Health Score)
-                        Center(
-                          child: HealthCircle(
-                            key: _healthCircleKey, 
-                            score: dynamicScore,
-                            size: circleSize,
-                          ),
-                        ),
-                        // PULSE-CORE: Transaction History Timeline
-                        SizedBox(height: isSmallScreen ? 12 : 20),
-                        Expanded(
-                          child: TransactionHistory(onDelete: _deleteTransaction),
-                        ),
-                        // ACTIONS: Smart Categories
-                        if (_amount != "0")
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8.0),
-                            child: SmartCategories(
-                              onCategoryTap: _processTransaction,
-                            ),
-                          ),
-                      ],
+                        );
+                      }
                     ),
-                  );
-                }
+                  ),
+                ),
               ),
             ),
             // INPUT: Glassmorphism Keypad
@@ -466,8 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// Key used to trigger animations in the HealthCircle child from the parent.
-final GlobalKey<_HealthCircleState> _healthCircleKey = GlobalKey<_HealthCircleState>();
+// PULSE-VISUAL: Shared UI Metadata removed (moved to local state)
 
 /**
  * Smart Categories Widget
@@ -901,6 +898,8 @@ class TransactionHistory extends StatelessWidget {
         if (!snapshot.hasData) return const SizedBox();
         final docs = snapshot.data!.docs;
         return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final data = docs[index].data() as Map<String, dynamic>;
